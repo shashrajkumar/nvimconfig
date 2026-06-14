@@ -11,22 +11,31 @@ vim.opt.tabstop = 4
 vim.opt.shiftwidth = 4
 vim.opt.expandtab = true
 
--- Enable mouse support (just in case)
+-- Enable mouse support
 vim.opt.mouse = 'a'
 
--- Sync clipboard between OS and Neovim
--- This fulfills: "yank should copy to clipboard"
+-- Sync clipboard between OS and Neovim ("yank should copy to clipboard")
 vim.opt.clipboard = 'unnamedplus'
 
 -- Set leader key to space
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
+-- yank highlight
+
+vim.api.nvim_create_autocmd('TextYankPost', {
+  desc = 'Highlight when yanking text',
+  group = vim.api.nvim_create_augroup('highlight-yank', { clear = true }),
+  callback = function()
+    vim.highlight.on_yank()
+  end,
+})
+
 -- ========================================================================== --
 --                               PLUGIN MANAGER                               --
 -- ========================================================================== --
 
--- Bootstrap lazy.nvim (downloads it automatically if missing)
+-- Bootstrap lazy.nvim
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not vim.loop.fs_stat(lazypath) then
   vim.fn.system({
@@ -41,18 +50,65 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 -- Setup plugins
+  
 require("lazy").setup({
-  -- LSP Configuration & Plugins
+  -- nvim-lspconfig still holds the library of server definitions!
+  {
+   'nvim-neo-tree/neo-tree.nvim',
+    version = '*',
+
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+      'nvim-tree/nvim-web-devicons',
+      'MunifTanjim/nui.nvim',
+    },
+
+    lazy = false,
+
+    keys = {
+      {
+        '\\',
+        ':Neotree reveal<CR>',
+        desc = 'NeoTree reveal',
+        silent = true,
+      },
+    },
+
+    opts = {
+      default_component_configs = {
+        git_status = {
+          symbols = {
+            added     = "+",
+            modified  = "*",
+            deleted   = "x",
+            renamed   = "r",
+            untracked = "?",
+            ignored   = "!",
+            unstaged  = "U",
+            staged    = "S",
+            conflict  = "C",
+          },
+        },
+      },
+
+      filesystem = {
+        window = {
+          mappings = {
+            ['\\'] = 'close_window',
+          },
+        },
+      },
+    },
+  },
   {
     "neovim/nvim-lspconfig",
     dependencies = {
-      -- Automatically install LSPs to stdpath for neovim
       "williamboman/mason.nvim",
       "williamboman/mason-lspconfig.nvim",
     },
   },
 
-  -- Optional: Autocompletion engine (highly recommended for LSP)
+  -- Autocompletion engine
   {
     "hrsh7th/nvim-cmp",
     dependencies = {
@@ -61,39 +117,39 @@ require("lazy").setup({
     },
   },
 
-  -- Optional: A nice colorscheme so it looks good out of the box
-  { "catppuccin/nvim", name = "catppuccin", priority = 1000 },
+  -- Colorscheme
+  { "rebelot/kanagawa.nvim", priority = 1000 },
+  -- { "folke/tokyonight.nvim", priority = 1000 },
 })
 
 -- Set colorscheme
-vim.cmd.colorscheme("catppuccin-mocha")
+-- vim.cmd.colorscheme("tokyonight-night")
+vim.cmd.colorscheme("kanagawa-dragon")
 
 -- ========================================================================== --
 --                               LSP & AUTOCOMPLETE                           --
 -- ========================================================================== --
 
--- Setup Mason to manage external tooling
+-- Setup Mason to manage external tooling binaries
 require("mason").setup()
-
--- Ensure the language servers for Go, Python, and C are installed
--- gopls -> Go
--- pyright -> Python
--- clangd -> C/C++
 require("mason-lspconfig").setup({
   ensure_installed = { "gopls", "pyright", "clangd" },
 })
 
 -- Capabilities for autocompletion
 local capabilities = vim.lsp.protocol.make_client_capabilities()
-local cmp_lsp = require("cmp_nvim_lsp")
-capabilities = cmp_lsp.default_capabilities(capabilities)
+capabilities = require("cmp_nvim_lsp").default_capabilities(capabilities)
 
--- Setup individual language servers
-local lspconfig = require("lspconfig")
+-- NEW API WAY: Define global configurations and enable them
+-- This replaces the deprecated `require('lspconfig').setup()` framework
+local servers = { "gopls", "pyright", "clangd" }
 
-lspconfig.gopls.setup({ capabilities = capabilities })
-lspconfig.pyright.setup({ capabilities = capabilities })
-lspconfig.clangd.setup({ capabilities = capabilities })
+for _, server in ipairs(servers) do
+  vim.lsp.config(server, {
+    capabilities = capabilities,
+  })
+  vim.lsp.enable(server)
+end
 
 -- Setup Autocompletion menu
 local cmp = require("cmp")
@@ -107,7 +163,7 @@ cmp.setup({
     ['<C-b>'] = cmp.mapping.scroll_docs(-4),
     ['<C-f>'] = cmp.mapping.scroll_docs(4),
     ['<C-Space>'] = cmp.mapping.complete(),
-    ['<CR>'] = cmp.mapping.confirm({ select = true }), -- Accept completion
+    ['<CR>'] = cmp.mapping.confirm({ select = true }),
   }),
   sources = cmp.config.sources({
     { name = 'nvim-lsp' },
@@ -118,8 +174,14 @@ cmp.setup({
 --                               KEYMAPS                                      --
 -- ========================================================================== --
 
--- Global LSP Keybindings (Press these when your cursor is on a variable/function)
-vim.keymap.set('n', 'gd', vim.lsp.buf.definition, { desc = "Go to Definition" })
-vim.keymap.set('n', 'K', vim.lsp.buf.hover, { desc = "Hover Documentation" })
-vim.keymap.set('n', '<leader>rn', vim.lsp.buf.rename, { desc = "Rename Symbol" })
-vim.keymap.set('n', '<leader>ca', vim.lsp.buf.code_action, { desc = "Code Action" })
+-- Modern Neovim maps these cleanly using an Autocommand when an LSP attaches
+vim.api.nvim_create_autocmd('LspAttach', {
+  callback = function(ev)
+    local opts = { buffer = ev.buf }
+    vim.keymap.set('n', 'gd', vim.lsp.buf.definition, vim.tbl_extend('force', opts, { desc = "Go to Definition" }))
+    vim.keymap.set('n', 'K', vim.lsp.buf.hover, vim.tbl_extend('force', opts, { desc = "Hover Documentation" }))
+    vim.keymap.set('n', '<leader>rn', vim.lsp.buf.rename, vim.tbl_extend('force', opts, { desc = "Rename Symbol" }))
+    vim.keymap.set('n', '<leader>ca', vim.lsp.buf.code_action, vim.tbl_extend('force', opts, { desc = "Code Action" }))
+    vim.keymap.set('n', '<Bslash>', ':NvimTreeToggle<CR>', { silent = true, desc = "Toggle File Tree" })
+  end,
+})
